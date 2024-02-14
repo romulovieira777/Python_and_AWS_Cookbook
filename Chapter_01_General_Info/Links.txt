@@ -1,0 +1,9 @@
+Python
+https://www.python.org/
+
+GitHub Boto
+https://github.com/boto/boto
+
+Pypi
+https://pypi.org/project/boto3/
+https://pypi.org/project/setuptools/
