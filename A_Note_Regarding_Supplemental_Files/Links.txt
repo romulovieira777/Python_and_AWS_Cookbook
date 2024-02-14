@@ -1,0 +1,2 @@
+Python and AWS Cookbook
+https://resources.oreilly.com/examples/0636920020202/?_gl=1%2av6lzlq%2a_ga%2aMTg3Mjk3ODAzMC4xNzAzMDc3MTkx%2a_ga_4WZYL59WMV%2aMTcwNzkxOTQyOS4zNi4xLjE3MDc5MjQ2MjYuMzMuMC4w
