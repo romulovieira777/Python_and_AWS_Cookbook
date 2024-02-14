@@ -1,0 +1,5 @@
+Pypi
+https://pypi.org/
+
+GitHub Boto
+https://github.com/boto/boto
