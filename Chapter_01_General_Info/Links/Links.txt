@@ -1,0 +1,42 @@
+Python
+https://www.python.org/
+
+GitHub Boto
+https://github.com/boto/boto
+
+Pypi
+https://pypi.org/project/boto3/
+https://pypi.org/project/setuptools/
+https://pypi.org/project/virtualenv/
+
+Paramiko
+https://www.lag.net/paramiko/
+
+euca2ools
+https://launchpad.net/euca2ools
+http://open.eucalyptus.com/downloads
+
+Amazon Web Services (AWS)
+https://aws.amazon.com/pt/
+http://support.rightscale.com/1._Tutorials/01-RightScale/1.5_Sign-up_for_AWS
+
+Flexera
+https://www.flexera.com/products/cloud-management-platform
+
+Boto Users Group
+https://groups.google.com/g/boto-users?pli=1
+
+What Is Eucalyptus?
+http://open.eucalyptus.com/learn/what-is-eucalyptus
+
+FastStart
+http://open.eucalyptus.com/try/faststart
+
+Eucalyptus Community Cloud
+http://open.eucalyptus.com/try/community-cloud
+
+Using boto with Google Cloud Storage
+https://cloud.google.com/storage/docs?csw=1
+
+Python Logging
+https://docs.python.org/3/library/logging.html

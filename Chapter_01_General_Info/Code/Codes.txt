@@ -1,0 +1,97 @@
+AWS SDK for Python (Boto)
+
+Explicitly pass credentials to boto
+% python
+Python 2.7.1 (r271:86882M, Nov 30 2010, 10:35:34)
+[GCC 4.2.1 (Apple Inc. build 5664)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import boto
+>>> ec2 = boto.connect_ec2(aws_access_key_id='my_access_key', aws_secret_access_key='my_secret_key')
+
+
+Store credentials in the boto config file
+[Credentials]
+aws_access_key_id = your_access_key
+aws_secret_access_key = your_secret_key
+
+
+A Quick Test
+% python
+Python 2.7.1 (r271:86882M, Nov 30 2010, 10:35:34)
+[GCC 4.2.1 (Apple Inc. build 5664)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import boto
+>>> ec2 = boto.connect_ec2()
+>>> ec2.get_all_zones()
+[Zone:us-east-1a, Zone:us-east-1b, Zone:us-east-1c, Zone:us-east-1d]
+
+
+Managing Your Eucalyptus Credentials in boto
+[Credentials]
+euca_access_key_id = your_euca_access_key
+euca_secret_access_key = your_euca_secret_key
+
+[Boto]
+eucalyptus_host = "DNS name or IP address of your Eucalyptus CLC"
+walrus_host = "DNS name or IP address of your Walrus"
+
+
+Connect to Eucalyptus
+% python
+>>> importar boto
+>>> euca = boto.connect_euca()
+>>> morsa = boto.connect_walrus()
+
+
+Connect to These Regions
+$ python
+Python 2.7.1 (r271:86882M, Nov 30 2010, 10:35:34)
+[GCC 4.2.1 (Apple Inc. build 5664)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import boto.ec2
+>>> boto.ec2.regions()
+[RegionInfo:eu-west-1, RegionInfo:us-east-1, RegionInfo:ap-northeast-1,
+RegionInfo:us-west-1, RegionInfo:ap-southeast-1]
+>>> eu_conn = _[0].connect()
+
+
+Connecting to a Specific Region
+$ python
+Python 2.7.1 (r271:86882M, Nov 30 2010, 10:35:34)
+[GCC 4.2.1 (Apple Inc. build 5664)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import boto.ec2
+>>> eu_conn = boto.ec2.connect_to_region('eu-west-1')
+
+
+Change a Region
+[Boto]
+ec2_region_name = eu-west-1
+
+
+Debug Output Printed to Your Interactive Console When Using Boto
+% python
+>>> import boto
+>>> boto.set_stream_logger('paws')
+>>> ec2 = boto.connect_ec2(debug=2)
+>>> s3 = boto.connect_s3(debug=2)
+
+
+Soquete Timeouts
+[Boto]
+http_socket_timeout = 5
+
+
+GCS (Google Cloud Storage) Credentials in boto
+[Credenciais]
+gs_access_key_id = sua_gs_access_key
+gs_secret_access_key = sua_gs_secret_key
+
+
+Create a Connection to Google Cloud Storage
+% python
+Python 2.7.1 (r271:86882M, Nov 30 2010, 10:35:34)
+[GCC 4.2.1 (Apple Inc. build 5664)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import boto
+>>> gs = boto.connect_gs()
