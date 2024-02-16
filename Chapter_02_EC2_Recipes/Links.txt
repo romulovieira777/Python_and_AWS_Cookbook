@@ -1,0 +1,23 @@
+Amazon CloudWatch concepts
+https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_concepts.html
+
+Amazon Simple Notification Service
+https://aws.amazon.com/pt/sns/
+
+Publish–subscribe pattern
+https://en.wikipedia.org/wiki/Publish%E2%80%93subscribe_pattern
+
+Puppet
+https://www.puppet.com/
+
+Chef
+https://www.chef.io/
+
+Creating AWS IAM Access Analyzers In All Regions Of All Accounts
+https://alestic.com/
+
+Amazon Linux AMI
+https://aws.amazon.com/pt/amazon-linux-ami/
+
+CloudInit
+https://help.ubuntu.com/community/CloudInit

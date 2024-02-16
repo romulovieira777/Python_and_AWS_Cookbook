@@ -246,3 +246,743 @@ fp = open('mykey.pub')
 material = fp.read()
 fp.close()
 key_pair = ec2.import_key_pair('mykey', material)
+
+
+Upload SSH Keypair
+import boto.ec2
+
+def sync_keypairs(keypair_name, public_key_file):
+    """
+    Synchronize SSH keypairs across all EC2 regions.
+
+    keypair_name    The name of the keypair.
+    public_key_file The path to the file containing the
+                    public key portion of the keypair.
+    """
+    fp = open(public_key_file)
+    material = fp.read()
+    fp.close()
+
+    for region in boto.ec2.regions():
+        ec2 = region.connect()
+        # Try to list the keypair.  If it doesn't exist
+        # in this region, then import it.
+        try:
+            key = ec2.get_all_key_pairs(keynames=[keypair_name])[0]
+            print 'Keypair(%s) already exists in %s' % (keypair_name,
+                                                        region.name)
+        except ec2.ResponseError, e:
+            if e.code == 'InvalidKeyPair.NotFound':
+                print 'Importing keypair(%s) to %s' % (keypair_name,
+                                                       region.name)
+                ec2.import_key_pair(keypair_name, material)
+
+
+Associate Elastic IP Address with an Instance
+import boto
+
+ec2 = boto.connect_ec2()
+
+# Let's assume the instance we are interested in has already been started
+# in the previous examples and is tagged with "paws".  This little
+# incantation will retrieve it for us.
+
+instance = ec2.get_all_instances(filters={'paws' : None})[0].instances[0]
+
+# Allocate an Elastic IP Address.  This will be associated with your
+# account until you explicitly release it.
+
+address = ec2.allocate_address()
+
+# Associate our new Elastic IP Address with our instance.
+
+ec2.associate_address(instance.id, address.public_ip)
+
+# Alternatively, you could do this.
+
+instance.use_ip(address)
+
+
+Attach a Volume
+import boto
+import time
+
+def create_and_attach_volume(instance, volume_size, device_name):
+    """
+    Create a new EBS volume and attach it to the instance.
+
+    instance    The instance object representing the instance to which
+                the volume will be attached.
+
+    volume_size The size (in GB) of the new volume.
+
+    device_name The device name to which the new volume will be
+                referred to on the instance.
+    """
+    ec2 = instance.connection
+    # Determine the Availability Zone of the instance
+    azone = instance.placement
+
+    volume = ec2.create_volume(volume_size, azone)
+
+    # Wait for the volume to be created.
+    while volume.status != 'available':
+        time.sleep(5)
+        volume.update()
+
+    volume.attach(instance.id, device_name)
+    return volume
+
+
+Snapshot an EBS Volume
+>>> import boto
+>>> ec2 = boto.connect_ec2()
+>>> reservations = ec2.get_all_instances(filters={'paws' : None})
+>>> instance = reservations[0].instances[0]
+>>> volumes = ec2.get_all_volumes(filters={'attachment.instance-id' : instance.id})
+>>> volumes
+[Volume:vol-990e5af3, Volume:vol-bdf7a2d7]
+>>> for v in volumes:
+....:   print v.attach_data.device
+....:
+/dev/sdh
+/dev/sda1
+>>> snaps = [v.create_snapshot() for v in volumes]
+>>> snaps
+[Snapshot:snap-42a60b21, Snapshot:snap-40a60b23]
+
+
+Restoring an EBS Volume
+>>> import boto
+>>> ec2 = boto.connect_ec2()
+>>> volume_id = 'vol-bdf7a2d7' # The failing EBS volume
+>>> bad_volume = ec2.get_all_volumes([volume_id])[0]
+>>> snaps = bad_volume.snapshots()
+>>> snaps.sort(key=lambda snap: snap.start_time)
+>>> latest_snap = snaps[-1]
+>>> new_volume = ec2.create_volume(bad_volume.size, bad_volume.zone, latest_snap)
+
+
+Clone a Running Instance
+import boto
+from boto.ec2.blockdevicemapping import BlockDeviceMapping, BlockDeviceType
+import os
+import base64
+
+def clone_instance(instance):
+    """
+    Make an clone of an existing Instance object.
+
+    instance      The Instance object to clone.
+    """
+    new_bdm = None
+    ec2 = instance.connection
+
+    if instance.block_device_mapping:
+        root_device_name = instance.get_attribute('rootDeviceName')['rootDeviceName']
+        user_data = instance.get_attribute('userData')['userData']
+        # user_data comes back base64 encoded.  Need to decode it so it
+        # can get re-encoded by run_instance !
+        user_data = base64.b64decode(user_data)
+        new_bdm = BlockDeviceMapping()
+        for dev in instance.block_device_mapping:
+            # if this entry is about the root device, skip it
+            if dev != root_device_name:
+                bdt = instance.block_device_mapping[dev]
+                if bdt.volume_id:
+                    volume = ec2.get_all_volumes([bdt.volume_id])[0]
+                    snaps = volume.snapshots()
+                    if len(snaps) == 0:
+                        print 'No snapshots available for %s' % volume.id
+                    else:
+                        # sort the list of snapshots, newest is at the end now
+                        snaps.sort(key=lambda snap: snap.start_time)
+                        latest_snap = snaps[-1]
+                        new_bdt = BlockDeviceType()
+                        new_bdt.snapshot_id = latest_snap.id
+                        new_bdm[dev] = new_bdt
+
+    return ec2.run_instances(instance.image_id,
+                             key_name=instance.key_name,
+                             security_groups=[g.name for g in instance.groups],
+                             user_data=user_data,
+                             instance_type=instance.instance_type,
+                             kernel_id=instance.kernel,
+                             ramdisk_id=instance.ramdisk,
+                             monitoring_enabled=instance.monitored,
+                             placement=instance.placement,
+                             block_device_map=new_bdm).instances[0]
+
+
+Find All Running Instances
+import boto
+import boto.ec2
+
+def print_running_instances(running_instances):
+    print 'The following running instances were found'
+    for account_name in running_instances:
+        print '\tAccount: %s' % account_name
+        d = running_instances[account_name]
+        for region_name in d:
+            print '\t\tRegion: %s' % region_name
+            for instance in d[region_name]:
+                print '\t\t\tAn %s instance: %s' % (instance.instance_type,
+                                                    instance.id)
+                print '\t\t\t\tTags=%s' % instance.tags
+
+def find_all_running_instances(accounts=None, quiet=False):
+    """
+    Will find all running instances across all EC2 regions for all of the
+    accounts supplied.
+
+    :type accounts: dict
+    :param accounts: A dictionary contain account information.  The key is
+                     a string identifying the account (e.g. "dev") and the
+                     value is a tuple or list containing the access key
+                     and secret key, in that order.
+                     If this value is None, the credentials in the boto
+                     config will be used.
+    """
+    if not accounts:
+        creds = (boto.config.get('Credentials', 'aws_access_key_id'),
+                 boto.config.get('Credentials', 'aws_secret_access_key'))
+        accounts = {'main' : creds}
+    running_instances = {}
+    for account_name in accounts:
+        running_instances[account_name] = {}
+        ak, sk = accounts[account_name]
+        for region in boto.ec2.regions():
+            conn = region.connect(aws_access_key_id=ak,
+                                  aws_secret_access_key=sk)
+            filters={'instance-state-name' : 'running'}
+            instances = []
+            reservations = conn.get_all_instances(filters=filters)
+            for r in reservations:
+                instances += r.instances
+            if instances:
+                running_instances[account_name][region.name] = instances
+    if not quiet:
+        print_running_instances(running_instances)
+    return running_instances
+
+if __name__ == '__main__':
+    find_all_running_instances()
+
+Here’s an example of the script in use and the output produced:
+>>> from ec2_find_all_running_instances import *
+>>> find_all_running_instances()
+The following running instances were found
+	Account: main
+		Region: us-east-1
+			An t1.micro instance: i-9221f9fd
+				Tags={u'midoc': ''}
+			An t1.micro instance: i-b62057d6
+				Tags={u'paws': ''}
+{'main': {u'us-east-1': [Instance:i-9221f9fd, Instance:i-b62057d6]}}
+
+
+Enable Monitoring Your Instance
+>>> import boto
+>>> ec2 = boto.connect_ec2()
+>>> reservations = ec2.get_all_instances(filters={'paws' : None})
+>>> instance = reservations[0].instances[0]
+>>> instance.monitor()
+
+
+Monitor Your Instance
+>>> cw = boto.connect_cloudwatch()
+>>> metrics = cw.list_metrics() 1
+>>> my_metrics = []
+>>> for metric in metrics: 2
+...   if 'InstanceId' in metric.dimensions:
+...     if instance.id in metric.dimensions['InstanceId']:
+...       my_metrics.append(metric)
+...
+>>> my_metrics
+[Metric:CPUUtilization(InstanceId,i-76894c16), Metric:DiskReadOps(InstanceId,i-76894c16),
+Metric:NetworkIn(InstanceId,i-76894c16), Metric:DiskWriteOps(InstanceId,i-76894c16),
+Metric:DiskWriteBytes(InstanceId,i-76894c16), Metric:DiskReadBytes(InstanceId,i-76894c16),
+Metric:NetworkOut(InstanceId,i-76894c16)]
+>>> import boto.utils
+>>> start_time = boto.utils.parse_ts(instance.launch_time) 3
+>>> start_time
+datetime.datetime(2011, 9, 6, 15, 3, 47)
+>>> import datetime
+>>> end_time = datetime.datetime.utcnow()  4
+>>> end_time
+datetime.datetime(2011, 9, 6, 16, 9, 25, 61216)
+>>> metric = my_metrics[0]
+>>> metric
+Metric:CPUUtilization(InstanceId,i-76894c16)
+>>> metric.Units 5
+['Seconds', 'Microseconds', 'Milliseconds', 'Bytes', 'Kilobytes', 'Megabytes',
+'Gigabytes', 'Terabytes', 'Bits', 'Kilobits', 'Megabits', 'Gigabits', 'Terabits',
+'Percent', 'Count', 'Bytes/Second', 'Kilobytes/Second', 'Megabytes/Second',
+'Gigabytes/Second', 'Terabytes/Second', 'Bits/Second', 'Kilobits/Second',
+'Megabits/Second', 'Gigabits/Second', 'Terabits/Second', 'Count/Second', None]
+>>> metric.Statistics 6
+['Minimum', 'Maximum', 'Sum', 'Average', 'SampleCount']
+>>> cpu_samples = metric.query(start_time, end_time, 'Average')  7
+>>> cpu_samples[0]
+{u'Timestamp': datetime.datetime(2011, 9, 6, 15, 3), u'Average': 0.38999999999999996, u'Unit': u'Percent'}
+>>> len(cpu_samples)
+61
+>>> my_metrics
+[Metric:CPUUtilization(InstanceId,i-76894c16), Metric:DiskReadOps(InstanceId,i-76894c16),
+Metric:NetworkIn(InstanceId,i-76894c16), Metric:DiskWriteOps(InstanceId,i-76894c16),
+Metric:DiskWriteBytes(InstanceId,i-76894c16), Metric:DiskReadBytes(InstanceId,i-76894c16),
+Metric:NetworkOut(InstanceId,i-76894c16)]
+>>> disk_read_metric = my_metrics[-2]
+>>> disk_read_metric
+Metric:DiskReadBytes(InstanceId,i-76894c16)
+>>> disk_samples = disk_read_metric.query(start_time, end_time, 'Maximum', 'Bytes')  8
+>>> len(disk_samples)
+61
+>>> disk_samples[0]
+{u'Timestamp': datetime.datetime(2011, 9, 6, 15, 13), u'Average': 0.0, u'Unit': u'Bytes'}
+>>> network_out_metric = my_metrics[-1]
+>>> metric
+Metric:NetworkOut(InstanceId,i-76894c16)
+>>> net_samples = metric.query(start_time, end_time, 'Maximum', period=120) 9
+>>> len(net_samples)
+31
+>>> net_samples[0]
+{u'Timestamp': datetime.datetime(2011, 9, 7, 7, 28), u'Maximum': 28.0, u'Unit': u'Bytes'}
+
+
+Configuring SNS for CloudWatch Alarms
+>>> import boto
+>>> sns = boto.connect_sns()
+>>> sns.create_topic('paws_cloudwatch')
+{u'CreateTopicResponse': {u'ResponseMetadata': {u'RequestId': u'73721b87-da0e-11e0-99a4-59769425d805'},
+ u'CreateTopicResult': {u'TopicArn': u'arn:aws:sns:us-east-1:084307701560:paws_cloudwatch'}}}
+>>> topic_arn = _['CreateTopicResponse']['CreateTopicResult']['TopicArn']
+>>> topic_arn
+u'arn:aws:sns:us-east-1:084307701560:paws_cloudwatch'
+>>> sns.subscribe(topic_arn, 'email', 'mitch@garnaat.org')
+{u'SubscribeResponse': {u'SubscribeResult': {u'SubscriptionArn': u'pending confirmation'},
+ u'ResponseMetadata': {u'RequestId': u'd4a846fd-da0e-11e0-bcf1-37db33647dea'}}}
+
+
+Creating a CloudWatch Alarm
+>>> import boto
+>>> cw = boto.connect_cloudwatch()
+>>> my_metrics = cw.list_metrics(dimensions={'InstanceId':'i-76894c16'})
+>>> my_metrics
+[Metric:DiskReadOps, Metric:NetworkOut, Metric:NetworkIn, Metric:DiskReadBytes,
+Metric:CPUUtilization, Metric:DiskWriteBytes, Metric:DiskWriteOps]
+>>> metric = my_metrics[4]
+>>> metric
+Metric:CPUUtilization
+>>> alarm = metric.create_alarm(name='CPUAlarm', comparison='>', threshold=80.0, period=60,
+evaluation_periods=2, statistic='Average',
+alarm_actions=['arn:aws:sns:us-east-1:084307701560:paws_cloudwatch'],
+ok_actions=['arn:aws:sns:us-east-1:084307701560:paws_cloudwatch'])
+>>> alarm
+MetricAlarm:CPUAlarm[CPUUtilization(Average) GreaterThanThreshold 80.0]
+>>> alarm.set_state('ALARM', 'Testing my alarm', '100')
+True
+>>> alarm.describe_history()
+[AlarmHistory:CPUAlarm[Successfully executed action arn:aws:sns:us-east-1:084307701560:paws_cloudwatch at 2011-09-20 14:32:14.355000],
+AlarmHistory:CPUAlarm[Alarm updated from ALARM to OK at 2011-09-20 14:32:14.354000],
+AlarmHistory:CPUAlarm[Successfully executed action arn:aws:sns:us-east-1:084307701560:paws_cloudwatch at 2011-09-20 14:32:13.562000],
+AlarmHistory:CPUAlarm[Alarm updated from OK to ALARM at 2011-09-20 14:32:13.561000],
+AlarmHistory:CPUAlarm[Successfully executed action arn:aws:sns:us-east-1:084307701560:paws_cloudwatch at 2011-09-20 14:27:31.440000],
+AlarmHistory:CPUAlarm[Alarm updated from INSUFFICIENT_DATA to OK at 2011-09-20 14:27:31.439000],
+AlarmHistory:CPUAlarm[Alarm "CPUAlarm" created at 2011-09-20 14:27:30.815000]]
+
+
+Easy Email Notifications
+import os
+import boto
+
+def easy_alarm(instance_id,
+               alarm_name,
+               email_addresses,
+               metric_name,
+               comparison,
+               threshold,
+               period,
+               eval_periods,
+               statistics):
+    """
+    Create a CloudWatch alarm for a given instance.  You can choose
+    the metric and dimension you want to associate with the alarm
+    and you can provide a list of email addresses that will be
+    notified when the alarm fires.
+
+    instance_id     The unique identifier of the instance you wish to
+                    monitoring.
+
+    alarm_name      A short but meaningful name for your alarm.
+
+    email_addresses A list of email addresses that you want to
+                    have notified when the alarm fires.
+
+    metric_name     The name of the Metric you want to be notified
+                    about.  Valid values are:
+                    DiskReadBytes|DiskWriteBytes|
+                    DiskReadOps|DiskWriteOps|
+                    NetworkIn|NetworkOut|
+                    CPUUtilization
+
+    comparison      The comparison operator.  Valid values are:
+                    >= | > | < | <=
+
+    threshold       The threshold value that the metric will
+                    be compared against.
+
+    period          The granularity of the returned data.
+                    Minimum value is 60 (seconds) and valid values
+                    must be multiples of 60.
+
+    eval_periods    The number of periods over which the alarm
+                    must be measured before triggering notification.
+
+    statistics      The statistic to apply.  Valid values are:
+                    SampleCount | Average | Sum | Minimum | Maximum
+
+    """
+    # Create a connection to the required services
+    ec2 = boto.connect_ec2()
+    sns = boto.connect_sns()
+    cw = boto.connect_cloudwatch()
+
+    # Make sure the instance in question exists and
+    # is being monitored with CloudWatch.
+    rs = ec2.get_all_instances(filters={'instance-id', instance_id})
+    if len(rs) != 1:
+        raise ValueError('Unable to find instance: %s' % instance_id)
+
+    instance = rs[0].instances[0]
+    instance.monitor()
+
+    # Create the SNS Topic
+    topic_name = 'CWAlarm-%s' % alarm_name
+    print 'Creating SNS topic: %s' % topic_name
+    response = sns.create_topic(topic_name)
+    topic_arn = response['CreateTopicResponse']['CreateTopicResult']['TopicArn']
+    print 'Topic ARN: %s' % topic_arn
+
+    # Subscribe the email addresses to SNS Topic
+    for addr in email_addresses:
+        print 'Subscribing %s to Topic %s' % (addr, topic_arn)
+        sns.subscribe(topic_arn, 'email', addr)
+
+    # Now find the Metric we want to be notified about
+    metric = cw.list_metrics(dimensions={'InstanceId':instance_id},
+                             metric_name=metric_name)[0]
+    print 'Found: %s' % metric
+
+    # Now create Alarm for the metric
+    print 'Creating alarm'
+    alarm = metric.create_alarm(name=alarm_name, comparison=comparison,
+                                threshold=threshold, period=period,
+                                evaluationn_periods=eval_periods,
+                                statistics=statistics,
+                                alarm_actions=[topic_arn],
+                                ok_actions=[topic_arn])
+
+
+CloudWatch Custom Metrics
+>>> import boto, time, datetime
+>>> start_time = datetime.datetime.utcnow()
+>>> cw = boto.connect_cloudwatch()
+>>> for i in range(0,100):
+...   cw.put_metric_data('PAWS', 'FooCount', i)
+...   time.sleep(5)
+...
+True
+True
+True
+True
+...
+>>> end_time = datetime.datetime.utcnow()
+>>> cw.list_metrics(namespace='PAWS')
+[Metric:FooCount]
+>>> metric.query(start_time, end_time, 'Maximum')
+[{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 30),
+u'Maximum': 78.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 27),
+u'Maximum': 42.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 24),
+u'Maximum': 7.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 28),
+u'Maximum': 54.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 29),
+u'Maximum': 66.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 25),
+u'Maximum': 18.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 32),
+u'Maximum': 99.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 22),
+u'Maximum': 1.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 31),
+u'Maximum': 90.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 26),
+u'Maximum': 30.0, u'Unit': u'None'}]
+>>> metric.query(start_time, end_time, 'Average')
+[{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 30),
+u'Average': 72.5, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 27),
+u'Average': 36.5, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 24),
+u'Average': 3.5, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 28),
+u'Average': 48.5, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 29),
+u'Average': 60.5, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 25),
+u'Average': 13.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 32),
+u'Average': 95.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 22),
+u'Average': 1.0, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 31),
+u'Average': 84.5, u'Unit': u'None'},
+{u'Timestamp': datetime.datetime(2011, 9, 20, 21, 26),
+u'Average': 24.5, u'Unit': u'None'}]
+
+
+A Simple User-Data Script
+>>> from ec2_launch_instance import launch_instance
+>>> script = """#!/bin/sh
+... echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
+... """
+>>> instance, cmdshell = launch_instance(user_data=script)
+Security Group: paws already authorized
+waiting for instance
+.
+.
+.
+.
+done
+SSH Connection refused, will retry in 5 seconds
+>>> cmdshell.shell()
+
+       __|  __|_  )
+       _|  (     /   Amazon Linux AMI
+      ___|\___|___|
+
+See /usr/share/doc/system-release/ for latest release notes.
+No packages needed for security; 1 packages available
+[ec2-user@domU-12-31-39-00-E4-53 ~]# sudo su
+[ec2-user@domU-12-31-39-00-E4-53 ~]# cd /root
+[ec2-user@domU-12-31-39-00-E4-53 ~]# ls
+output.txt
+[ec2-user@domU-12-31-39-00-E4-53 ~]# cat output.txt
+Hello World.  The time is now Wed, 21 Sep 2011 23:53:51 +0000!
+[ec2-user@domU-12-31-39-00-E4-53 ~]# exit
+[ec2-user@domU-12-31-39-00-E4-53 ~]$ logout
+
+*** EOF
+>>> instance.terminate()
+
+
+Creating a Restricted User with IAM
+import boto
+
+# Create a restricted user using IAM
+
+# The following JSON policy was generated using the
+# AWS Policy Generator app.
+# http://awspolicygen.s3.amazonaws.com/policygen.html
+
+policy_json = """{
+  "Statement": [
+    {
+      "Sid": "Stmt1316576423630",
+      "Action": [
+        "cloudwatch:PutMetricData"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
+    }
+  ]
+}"""
+
+def create_restricted_user(user_name):
+    """
+    Create a new user in this account.  The user will be
+    restricted by the JSON policy document above.
+    This function returns a tuple containing the access key
+    and secret key for the new account.
+
+    user_name The name of the new user.
+    """
+    iam = boto.connect_iam()
+    user = iam.create_user(user_name)
+    keys = iam.create_access_key(user_name)
+    response = iam.put_user_policy(user_name,
+                                   'CloudWatchPutMetricData',
+                                   policy_json)
+    fp = open('boto.cfg', 'w')
+    fp.write('[Credentials]\n')
+    fp.write('aws_access_key_id = %s\n' % keys.access_key_id)
+    fp.write('aws_secret_access_key = %s\n' % keys.secret_access_key)
+    fp.close()
+
+
+Custom Metric for Disk Usage
+#!/usr/bin/env python
+import boto
+import time
+import datetime
+import os
+
+def main():
+    cw = boto.connect_cloudwatch()
+    md = boto.utils.get_instance_metadata()
+    now = datetime.datetime.utcnow()
+    stats = os.statvfs('/')
+    total = float(stats.f_blocks * stats.f_bsize)
+    available = float(stats.f_bavail * stats.f_bsize)
+    percent_used = int(100 - 100 * (available / total))
+    print 'metric_disk_usage: %d' % percent_used
+    cw.put_metric_data(namespace='PAWS',
+                       name='DiskUsage',
+                       value=percent_used,
+                       timestamp=now,
+                       unit='Percent',
+                       dimensions=[{'InstanceId' : md['instance-id']}])
+
+if __name__ == "__main__":
+    main()
+
+
+Custom CloudInit Part Handler
+#part-handler
+
+import os
+
+def list_types():
+    """
+    Return a list of mime-types that are handled by this module.
+    """
+    return(['text/x-config', 'text/x-metric'])
+
+def handle_part(data, ctype, filename, payload):
+    """
+    data:     the cloudinit object
+    ctype:    '__begin__', '__end__', or the specific mime-type of the part
+    filename: the filename for the part, or dynamically generated part if
+              no filename is given attribute is present
+    payload:  the content of the part (empty for begin or end)
+    """
+    if ctype == 'text/x-config':
+        path = os.path.join('/etc', filename)
+        fp = open(path, 'w')
+        fp.write(payload)
+        fp.close()
+        print '==== wrote %s payload to %s ====' % (ctype, path)
+    elif ctype == 'text/x-metric':
+        # Save metric command as an executable
+        path = os.path.join('/usr/local/sbin', filename)
+        fp = open(path, 'w')
+        fp.write(payload)
+        fp.close()
+        os.chmod(path, 0755)
+        # Add an entry to tell cron to run this every minute
+        path = os.path.join('/etc/cron.d', filename)
+        fp = open(path, 'w')
+        fp.write('root /usr/local/sbin/%s' % filename)
+        fp.close()
+
+
+Custom CloudInit Packager
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+import gzip
+import cStringIO
+import os
+
+script = """#!/bin/sh
+echo "Installing boto..."
+cd /root
+git clone git://github.com/boto/boto.git
+cd boto
+python setup.py install
+echo "...done"
+"""
+
+cloud_config = """
+packages:
+ - python-setuptools
+
+runcmd:
+ - [ easy_install, boto ]
+"""
+
+def create_txt_part(path, subtype, filename=None):
+    fp = open(path)
+    s = fp.read()
+    fp.close()
+    txt = MIMEText(s, _subtype=subtype)
+    if filename:
+        txt.add_header('Content-Disposition',
+                       'attachment', filename=filename)
+    return txt
+
+def build_userdata(metric_dir):
+    mp = MIMEMultipart()
+    # Add our part handler
+    path = os.path.join(metric_dir, 'metric_part_handler.py')
+    txt = create_txt_part(path, 'part-handler', 'metric_part_handler.py')
+    mp.attach(txt)
+    # Add the boto config file
+    path = os.path.join(metric_dir, 'boto.cfg')
+    txt = create_txt_part(path, 'x-config', 'boto.cfg')
+    mp.attach(txt)
+    # Add the cloud-config
+    txt = MIMEText(cloud_config, _subtype='cloud-config')
+    mp.attach(txt)
+    # Add disk metric
+    path = os.path.join(metric_dir, 'metric_disk_usage')
+    txt = create_txt_part(path, 'x-metric', 'metric_disk_usage')
+    mp.attach(txt)
+
+    gfileobj = cStringIO.StringIO()
+    gfile = gzip.GzipFile(fileobj=gfileobj, mode='wb')
+    gfile.write(mp.as_string())
+    gfile.close()
+
+    return gfileobj.getvalue()
+
+
+A Simple User-Data Script
+>>> from ec2_custom_script_server import build_userdata
+>>> from ec2_launch_instance import launch_instance
+>>> user_data = build_userdata(metric_dir='./metrics')
+>>> instance, cmd = launch_instance(user_data=user_data)
+
+
+A Simple User-Data Script
+>>> import boto
+>>> cw = boto.connect_cloudwatch()
+>>> ec2 = boto.connect_ec2()
+>>> import datetime
+>>> metrics = cw.list_metrics(namespace='PAWS', metric_name='DiskUsage')
+>>> metrics
+[Metric:DiskUsage]
+>>> metric = metrics[0]
+>>> r = ec2.get_all_instances([metric.dimensions['InstanceId'][0]])
+>>> instance = r[0].instances[0]
+>>> start_time = boto.utils.parse_ts(instance.launch_time)
+>>> end_time = datetime.datetime.utcnow()
+>>> metric.query(start_time, end_time, ['Maximum'])
+[{u'Maximum': 12.0,
+  u'Timestamp': datetime.datetime(2011, 9, 22, 15, 32),
+  u'Unit': u'Percent'},
+ {u'Maximum': 12.0,
+  u'Timestamp': datetime.datetime(2011, 9, 22, 15, 17),
+  u'Unit': u'Percent'},
+ {u'Maximum': 12.0,
+  u'Timestamp': datetime.datetime(2011, 9, 22, 15, 31),
+  u'Unit': u'Percent'},
+ {u'Maximum': 12.0,
+ u'Timestamp': datetime.datetime(2011, 9, 22, 14, 44),
+  u'Unit': u'Percent'},
+...
+ {u'Maximum': 12.0,
+  u'Timestamp': datetime.datetime(2011, 9, 22, 14, 39),
+  u'Unit': u'Percent'}]
