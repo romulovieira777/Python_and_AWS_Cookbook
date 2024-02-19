@@ -1,0 +1,5 @@
+Autenticação multifator (MFA) para o IAM
+https://aws.amazon.com/pt/iam/features/mfa/?audit=2019q1
+
+Amazon S3: Multipart Upload
+https://aws.amazon.com/pt/blogs/aws/amazon-s3-multipart-upload/
